@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trang bị chặn</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 20px;
+      padding: 60px 40px;
+      max-width: 520px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    }
+
+    .icon {
+      font-size: 80px;
+      margin-bottom: 24px;
+      display: block;
+    }
+
+    h1 {
+      font-size: 28px;
+      color: #111827;
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+
+    .domain {
+      background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+      border: 2px solid #fecaca;
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      color: #dc2626;
+      display: inline-block;
+      margin: 20px 0;
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    .reason {
+      font-size: 15px;
+      color: #6b7280;
+      margin: 20px 0;
+      line-height: 1.6;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 32px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      padding: 12px 28px;
+      border-radius: 10px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+
+    .btn-back {
+      background: #667eea;
+      color: white;
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .btn-back:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+    }
+
+    .btn-home {
+      background: #f3f4f6;
+      color: #667eea;
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .btn-home:hover {
+      background: #e5e7eb;
+    }
+
+    .footer {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 13px;
+      color: #9ca3af;
+    }
+
+    .footer-icon {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+
+    .tips {
+      background: #f0f9ff;
+      border-left: 4px solid #0ea5e9;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 24px;
+      text-align: left;
+      font-size: 13px;
+      color: #0369a1;
+    }
+
+    .tips strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="icon">🚫</span>
+    <h1>Trang web bị chặn</h1>
+    
+    <div class="domain" id="domain-display">example.com</div>
+    
+    <p class="reason" id="reason-display">Không có trong danh sách được phép</p>
+
+    <div class="buttons">
+      <button class="btn btn-back" onclick="history.back()">← Quay lại</button>
+      <button class="btn btn-home" onclick="window.location.href='https://www.google.com'">🏠 Trang chủ</button>
+    </div>
+
+    <div class="tips">
+      <strong>💡 Mẹo:</strong>
+      Nếu bạn muốn truy cập trang này, hãy liên hệ bố/mẹ để được cấp quyền truy cập.
+    </div>
+
+    <div class="footer">
+      <div class="footer-icon">🛡️</div>
+      <p>Family Guardian — Bộ lọc web an toàn</p>
+    </div>
+  </div>
+
+  <script src="blocked.js"></script>
+</body>
+</html>
