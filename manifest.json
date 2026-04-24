@@ -13,7 +13,9 @@
     "identity.email",
     "storage",
     "alarms",
-    "tabs"
+    "tabs",
+    "webRequest",
+    "notifications"
   ],
   "host_permissions": [
     "http://*/*",
