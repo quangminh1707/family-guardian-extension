@@ -23,8 +23,8 @@ Bộ lọc web an toàn cho trẻ em, kiểm soát truy cập qua Google Account
    - Thay `YOUR_GOOGLE_CLIENT_ID` bằng Google Client ID thật
    - Xem hướng dẫn trong "Đăng ký Google OAuth" bên dưới
 
-4. Cập nhật `popup.js` và `background.js`:
-   - Thay `https://yourserver.com/api/extension` bằng URL backend thật
+4. Cập nhật `.env`:
+   - Thay `API_BASE_URL`, `BLOCK_PAGE_URL`, và `EXTENSION_GUIDE_URL` bằng URL backend thật
 
 ### Bước 2: Load Extension
 
@@ -123,18 +123,11 @@ console.log(await res.json());
 
 ### Thay đổi API URL
 
-File `background.js` (dòng ~6):
-```javascript
-const CONFIG = {
-  API_BASE: "https://yourserver.com/api/extension",  // ← Thay đây
-  CACHE_TTL_MS: 5 * 60 * 1000,
-  HEARTBEAT_INTERVAL_MS: 30000,
-};
-```
-
-File `popup.js` (dòng ~1):
-```javascript
-const API_BASE = "https://yourserver.com/api/extension";  // ← Thay đây
+Sửa file `.env`:
+```bash
+API_BASE_URL=https://yourserver.com/api/extension
+BLOCK_PAGE_URL=https://yourserver.com/blocked
+EXTENSION_GUIDE_URL=https://yourserver.com/guide/extension
 ```
 
 ### Thay đổi cache time
@@ -154,6 +147,8 @@ const API_BASE = "https://yourserver.com/api/extension";  // ← Thay đây
 family-guardian-extension/
 ├── manifest.json          ← Extension config
 ├── background.js          ← Service worker (main logic)
+├── env.js                 ← Shared .env loader
+├── .env                   ← Runtime config values
 ├── popup.html             ← Popup UI
 ├── popup.js               ← Popup logic
 ├── blocked.html           ← Block page

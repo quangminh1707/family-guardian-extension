@@ -324,7 +324,7 @@
 const domainCache = new Map();
 
 const CONFIG = {
-  API_BASE: "http://localhost:5247/api/extension",
+  API_BASE: "https://familyguardian-api.onrender.com/api/extension",
   CACHE_TTL_MS: 1 * 60 * 1000,
 };
 

@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:5247/api/extension";
+const API_BASE = "https://familyguardian-api.onrender.com/api/extension";
 
 async function getToken(interactive = false) {
   return new Promise((resolve) => {
