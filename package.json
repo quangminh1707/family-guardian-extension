@@ -1,0 +1,9 @@
+{
+  "name": "family-guardian-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build-config.js",
+    "setup": "node -e \"const fs=require('fs'); if(!fs.existsSync('.env')) fs.copyFileSync('.env.example','.env'); console.log('Fill values in .env then run npm run build');\""
+  }
+}

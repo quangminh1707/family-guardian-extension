@@ -1,0 +1,16 @@
+# Secret - do not commit
+.env
+.env.production
+.env.local
+
+# Generated files - do not commit
+config.js
+manifest.json
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+*.log

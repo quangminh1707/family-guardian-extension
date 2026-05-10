@@ -147,7 +147,8 @@ EXTENSION_GUIDE_URL=https://yourserver.com/guide/extension
 family-guardian-extension/
 ├── manifest.json          ← Extension config
 ├── background.js          ← Service worker (main logic)
-├── env.js                 ← Shared .env loader
+├── build-config.js        ← Generates config.js and manifest.json
+├── manifest.template.json ← Manifest base template
 ├── .env                   ← Runtime config values
 ├── popup.html             ← Popup UI
 ├── popup.js               ← Popup logic

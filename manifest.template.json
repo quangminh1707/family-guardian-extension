@@ -31,21 +31,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "blocked.html"
-      ],
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ]
+      "resources": ["blocked.html"],
+      "matches": ["http://*/*", "https://*/*"]
     }
   ],
   "oauth2": {
-    "client_id": "546760398169-09872hbivb30pa85m2h9rk5ibjgkpl62.apps.googleusercontent.com",
-    "scopes": [
-      "openid",
-      "email",
-      "profile"
-    ]
+    "client_id": "PLACEHOLDER_REPLACED_BY_BUILD",
+    "scopes": ["openid", "email", "profile"]
   }
 }

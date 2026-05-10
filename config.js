@@ -1,11 +1,7 @@
-// Configuration for Family Guardian Extension
+// AUTO-GENERATED - do not edit by hand
 const CONFIG = {
-  // Replace with your actual backend URL
-  API_BASE: "https://familyguardian-api.onrender.com/api/extension",
-  // Cache TTL in milliseconds (5 minutes)
-  CACHE_TTL_MS: 5 * 60 * 1000,
-  // Heartbeat interval in milliseconds (30 seconds)
+  API_BASE: "http://localhost:5247/api/extension",
+  CACHE_TTL_MS: 60000,
   HEARTBEAT_INTERVAL_MS: 30000,
-  // Block page URL
-  BLOCK_PAGE_URL: "https://familyguardian-api.onrender.com/blocked"
+  BLOCK_PAGE_URL: "http://localhost:5247/blocked"
 };
