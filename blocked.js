@@ -1,82 +1,226 @@
-// Parse query parameters from URL
 const params = new URLSearchParams(location.search);
-const domain = params.get("domain") || "trang web này";
-const reason = params.get("reason") || "Không có trong danh sách được phép";
+const blockedDomain = params.get('domain') || '';
+const rawReason = params.get('reason') || '';
+const blockedFullUrl = params.get('url') || '';
+const TOKEN_KEY = 'googleToken';
 
-// Display domain and reason
-document.getElementById("domain-display").textContent = domain;
-document.getElementById("reason-display").textContent = reason;
-document.title = `Bị chặn — ${domain}`;
+document.getElementById('domain-display').textContent = blockedDomain || 'trang web này';
+document.getElementById('reason-display').textContent = rawReason || 'Không có trong danh sách được phép';
+document.title = `Bị chặn — ${blockedDomain || 'Family Guardian'}`;
 
-// ============================================================
-// REQUEST ACCESS — Thêm mới, KHÔNG sửa code cũ phía trên
-// ============================================================
-(function initRequestAccess() {
-  const requestSection = document.getElementById('request-section');
+async function getGoogleToken() {
+  const stored = await chrome.storage.local.get([TOKEN_KEY]);
+  if (stored[TOKEN_KEY]) return stored[TOKEN_KEY];
+
+  return new Promise((resolve) => {
+    chrome.identity.getAuthToken({ interactive: false }, (token) => {
+      if (chrome.runtime.lastError || !token) {
+        resolve(null);
+        return;
+      }
+      resolve(token);
+    });
+  });
+}
+
+function getApiBase() {
+  return typeof CONFIG !== 'undefined' ? CONFIG.API_BASE : '/api/extension';
+}
+
+(function initRequestAccessV3() {
+  const reasonMsgEl = document.getElementById('block-reason-msg');
   const btnRequest = document.getElementById('btn-request-access');
+  const btnText = document.getElementById('btn-request-text');
   const statusDiv = document.getElementById('request-status');
-  
-  if (!btnRequest || !statusDiv || !requestSection) return;
+  const pollingEl = document.getElementById('polling-indicator');
 
-  if (reason.includes("Không có trong danh sách được phép")) {
-    requestSection.style.display = 'block';
+  if (!btnRequest || !statusDiv) return;
+
+  const apiBase = getApiBase();
+  let currentReason = detectReason(rawReason);
+  let pollTimer = null;
+  let pollCount = 0;
+  const MAX_POLL = 40;
+
+  function detectReason(raw) {
+    if (!raw) return 'not_in_whitelist';
+    const lower = raw.toLowerCase();
+    if (lower.includes('tạm dừng') || lower.includes('paused') || lower.includes('internet')) {
+      return 'internet_paused';
+    }
+    if (lower.includes('hết') || lower.includes('giờ') || lower.includes('time') || lower.includes('limit')) {
+      return 'time_limit_exceeded';
+    }
+    return 'not_in_whitelist';
   }
 
-  const blockedDomain = domain;
-  const blockedFullUrl = location.href;
-
-  function showStatus(message, type) {
-    statusDiv.textContent = message;
+  function showStatus(msg, type) {
     statusDiv.style.display = 'block';
-    if (type === 'success') {
-      statusDiv.style.background = 'rgba(34,197,94,0.15)';
-      statusDiv.style.color = '#4ade80';
-      statusDiv.style.border = '1px solid rgba(34,197,94,0.3)';
-    } else if (type === 'error') {
-      statusDiv.style.background = 'rgba(239,68,68,0.15)';
-      statusDiv.style.color = '#f87171';
-      statusDiv.style.border = '1px solid rgba(239,68,68,0.3)';
+    statusDiv.textContent = msg;
+    const map = {
+      success: { bg: 'rgba(34,197,94,0.12)', color: '#4ade80', border: 'rgba(34,197,94,0.25)' },
+      error: { bg: 'rgba(239,68,68,0.12)', color: '#f87171', border: 'rgba(239,68,68,0.25)' },
+      info: { bg: 'rgba(124,58,237,0.12)', color: '#c4b5fd', border: 'rgba(124,58,237,0.25)' },
+    };
+    const c = map[type] || map.info;
+    statusDiv.style.cssText += `
+      background:${c.bg}; color:${c.color}; border:1px solid ${c.border};
+    `;
+  }
+
+  function renderReasonMessage() {
+    if (!reasonMsgEl || !blockedDomain) return;
+    if (currentReason === 'internet_paused') {
+      reasonMsgEl.innerHTML = `⏸ <strong>Internet đang bị tạm dừng</strong> bởi phụ huynh.<br>
+        Gửi yêu cầu để bố/mẹ bật lại.`;
+      reasonMsgEl.style.borderColor = 'rgba(239,68,68,0.25)';
+      reasonMsgEl.style.background = 'rgba(239,68,68,0.06)';
+      if (btnText) btnText.textContent = 'Yêu cầu bật lại Internet';
+    } else if (currentReason === 'time_limit_exceeded') {
+      reasonMsgEl.innerHTML = `⏱ Bạn đã <strong>hết thời gian</strong> cho <strong>${blockedDomain}</strong> hôm nay.<br>
+        Gửi yêu cầu để bố/mẹ gia hạn thêm.`;
+      reasonMsgEl.style.borderColor = 'rgba(251,191,36,0.25)';
+      reasonMsgEl.style.background = 'rgba(251,191,36,0.06)';
+      if (btnText) btnText.textContent = 'Xin thêm thời gian';
     } else {
-      statusDiv.style.background = 'rgba(251,191,36,0.15)';
-      statusDiv.style.color = '#fbbf24';
-      statusDiv.style.border = '1px solid rgba(251,191,36,0.3)';
+      reasonMsgEl.innerHTML = `🌐 Trang <strong>${blockedDomain}</strong> chưa được bố/mẹ cho phép.<br>
+        Gửi yêu cầu để được duyệt truy cập.`;
+      reasonMsgEl.style.borderColor = 'rgba(124,58,237,0.25)';
+      reasonMsgEl.style.background = 'rgba(124,58,237,0.06)';
+      if (btnText) btnText.textContent = 'Gửi yêu cầu truy cập';
     }
   }
 
-  btnRequest.addEventListener('mouseover', () => {
-    btnRequest.style.background = 'rgba(124,58,237,0.25)';
-  });
-  btnRequest.addEventListener('mouseout', () => {
-    if (!btnRequest.disabled) btnRequest.style.background = 'rgba(124,58,237,0.15)';
-  });
+  async function loadReasonFromApi() {
+    if (rawReason || !blockedDomain) {
+      renderReasonMessage();
+      return;
+    }
+    try {
+      const stored = await chrome.storage.local.get([TOKEN_KEY]);
+      const token = stored[TOKEN_KEY];
+      if (!token) {
+        renderReasonMessage();
+        return;
+      }
 
-  btnRequest.addEventListener('click', () => {
+      const res = await fetch(`${apiBase}/block-info?domain=${encodeURIComponent(blockedDomain)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const info = await res.json();
+        currentReason = info.reason || 'not_in_whitelist';
+      }
+    } catch {
+      // Use default reason if API lookup fails.
+    }
+    renderReasonMessage();
+  }
+
+  btnRequest.addEventListener('click', async () => {
     btnRequest.disabled = true;
-    btnRequest.style.opacity = '0.6';
-    btnRequest.textContent = 'Đang gửi...';
+    btnRequest.style.opacity = '0.5';
+    if (btnText) btnText.textContent = 'Đang gửi...';
 
-    // Gửi message cho background script để request api (vì background mới lấy được token)
-    chrome.runtime.sendMessage({
-      type: "REQUEST_ACCESS",
-      domain: blockedDomain,
-      fullUrl: blockedFullUrl
-    }, (response) => {
-      if (chrome.runtime.lastError || !response || !response.success) {
-        showStatus(response?.error || 'Lỗi kết nối. Kiểm tra mạng và thử lại.', 'error');
+    try {
+      const stored = await chrome.storage.local.get([TOKEN_KEY]);
+      const token = stored[TOKEN_KEY] || (await getGoogleToken());
+      if (!token) throw new Error('no_token');
+
+      const res = await fetch(`${apiBase}/request-access`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          domain: blockedDomain,
+          reason: currentReason,
+        }),
+      });
+
+      if (res.ok) {
+        showStatus('✅ Đã gửi! Trang sẽ tự mở khi bố/mẹ duyệt.', 'success');
+        if (btnText) btnText.textContent = 'Đã gửi yêu cầu';
+        startActivePolling();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const msg = data.message || 'Gửi thất bại. Thử lại sau.';
+        showStatus(msg, 'error');
         btnRequest.disabled = false;
         btnRequest.style.opacity = '1';
-        btnRequest.textContent = '📨 Gửi yêu cầu truy cập cho bố/mẹ';
-      } else {
-        showStatus('✅ Đã gửi! Bố/mẹ sẽ nhận được thông báo ngay.', 'success');
-        btnRequest.textContent = 'Đã gửi yêu cầu';
-        // Disable 5 phút để tránh spam
-        setTimeout(() => {
-          btnRequest.disabled = false;
-          btnRequest.style.opacity = '1';
-          btnRequest.textContent = '📨 Gửi yêu cầu truy cập cho bố/mẹ';
-          statusDiv.style.display = 'none';
-        }, 5 * 60 * 1000);
+        renderReasonMessage();
       }
-    });
+    } catch (e) {
+      if (e.message === 'no_token') {
+        showStatus('Không tìm thấy phiên đăng nhập. Mở extension và đăng nhập lại.', 'error');
+      } else {
+        showStatus('Lỗi kết nối. Kiểm tra mạng và thử lại.', 'error');
+      }
+      btnRequest.disabled = false;
+      btnRequest.style.opacity = '1';
+      renderReasonMessage();
+    }
   });
+
+  async function checkAndRedirect() {
+    if (!blockedDomain) return false;
+    try {
+      const stored = await chrome.storage.local.get([TOKEN_KEY]);
+      const token = stored[TOKEN_KEY] || (await getGoogleToken());
+      if (!token) return false;
+
+      const res = await fetch(`${apiBase}/check?domain=${encodeURIComponent(blockedDomain)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      const isAllowed = data.allowed === true || data.isAllowed === true || data.result === true;
+      if (isAllowed) {
+        if (pollTimer) clearInterval(pollTimer);
+        const targetUrl = blockedFullUrl || `https://${blockedDomain}`;
+        window.location.href = targetUrl;
+        return true;
+      }
+    } catch {
+      // Ignore network issues and continue polling.
+    }
+    return false;
+  }
+
+  function startPassivePolling() {
+    setTimeout(checkAndRedirect, 5000);
+
+    pollTimer = setInterval(async () => {
+      pollCount++;
+      if (pollCount > MAX_POLL) {
+        clearInterval(pollTimer);
+        if (pollingEl) pollingEl.style.display = 'none';
+        return;
+      }
+      await checkAndRedirect();
+    }, 30_000);
+  }
+
+  function startActivePolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollCount = 0;
+    if (pollingEl) pollingEl.style.display = 'block';
+
+    setTimeout(checkAndRedirect, 3000);
+
+    pollTimer = setInterval(async () => {
+      pollCount++;
+      if (pollCount > MAX_POLL) {
+        clearInterval(pollTimer);
+        if (pollingEl) pollingEl.style.display = 'none';
+        return;
+      }
+      const redirected = await checkAndRedirect();
+      if (redirected) clearInterval(pollTimer);
+    }, 10_000);
+  }
+
+  loadReasonFromApi();
+  startPassivePolling();
 })();

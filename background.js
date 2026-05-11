@@ -190,7 +190,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (!result.allowed) {
       chrome.tabs.update(tabId, {
         url: chrome.runtime.getURL("blocked.html")
-          + `?domain=${encodeURIComponent(domain)}&reason=${encodeURIComponent(result.reason)}`
+          + `?domain=${encodeURIComponent(domain)}&reason=${encodeURIComponent(result.reason)}&url=${encodeURIComponent(tab.url)}`
       });
     } else if (result.websiteId) {
       activeTab = { tabId, domain, websiteId: result.websiteId };
@@ -239,12 +239,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       if (data.limitExceeded) {
         const tabId  = activeTab.tabId;
         const domain = activeTab.domain;
+        const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+        const blockedUrl = currentTab?.url || `https://${domain}`;
         activeTab = null;
         domainCache.delete(domain);
         chrome.tabs.update(tabId, {
           url: chrome.runtime.getURL("blocked.html")
             + `?domain=${encodeURIComponent(domain)}`
-            + `&reason=${encodeURIComponent("Đã hết thời gian sử dụng hôm nay")}`
+            + `&reason=${encodeURIComponent("time_limit_exceeded")}`
+            + `&url=${encodeURIComponent(blockedUrl)}`
         });
         console.log(`[BLOCK] ${domain}`);
         return; // dừng luôn, không làm gì thêm
@@ -302,7 +305,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         },
         body: JSON.stringify({
           domain: message.domain,
-          fullUrl: message.fullUrl
+          fullUrl: message.fullUrl,
+          reason: message.reason || "not_in_whitelist",
+          requestedDurationMinutes: message.requestedDurationMinutes ?? null,
+          requestedStartTime: message.requestedStartTime ?? null,
+          requestedEndTime: message.requestedEndTime ?? null
         })
       })
       .then(res => res.json().then(data => ({ ok: res.ok, data })))
