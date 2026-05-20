@@ -1,11 +1,14 @@
-const params = new URLSearchParams(location.search);
+﻿const params = new URLSearchParams(location.search);
 const blockedDomain = params.get('domain') || '';
 const rawReason = params.get('reason') || '';
 const blockedFullUrl = params.get('url') || '';
 const TOKEN_KEY = 'googleToken';
 
-document.getElementById('domain-display').textContent = blockedDomain || 'trang web này';
-document.getElementById('reason-display').textContent = rawReason || 'Không có trong danh sách được phép';
+const domainDisplayEl = document.getElementById('domain-display');
+const reasonDisplayEl = document.getElementById('block-reason');
+
+domainDisplayEl.textContent = blockedDomain || 'trang web này';
+reasonDisplayEl.textContent = rawReason || 'Không có trong danh sách được phép';
 document.title = `Bị chặn — ${blockedDomain || 'Family Guardian'}`;
 
 async function getGoogleToken() {
@@ -28,7 +31,11 @@ function getApiBase() {
 }
 
 (function initRequestAccessV3() {
+  const titleEl = document.getElementById('block-title');
+  const reasonEl = document.getElementById('block-reason');
   const reasonMsgEl = document.getElementById('block-reason-msg');
+  const reasonTextEl = document.getElementById('block-reason-text');
+  const infoEl = document.getElementById('block-info-detail');
   const btnRequest = document.getElementById('btn-request-access');
   const btnText = document.getElementById('btn-request-text');
   const statusDiv = document.getElementById('request-status');
@@ -37,21 +44,94 @@ function getApiBase() {
   if (!btnRequest || !statusDiv) return;
 
   const apiBase = getApiBase();
-  let currentReason = detectReason(rawReason);
-  let pollTimer = null;
-  let pollCount = 0;
-  const MAX_POLL = 40;
+  let currentReason = detectReasonType(rawReason);
+  let currentBlockMode = detectBlockMode(rawReason);
+  const FAST_POLL_MS = 8000;
+  const SLOW_POLL_MS = 20000;
+  let fastPollTimer = null;
+  let slowPollTimer = null;
+  let lastConfig = null;
 
-  function detectReason(raw) {
+  function detectBlockMode(raw) {
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    if (lower.includes('khung') || lower.includes('window') || lower.includes('ngoài')) {
+      return 'time_window';
+    }
+    if (lower.includes('limit') || lower.includes('hết') || lower.includes('time')) {
+      return 'time_limit';
+    }
+    return null;
+  }
+
+  function detectReasonType(raw) {
     if (!raw) return 'not_in_whitelist';
     const lower = raw.toLowerCase();
     if (lower.includes('tạm dừng') || lower.includes('paused') || lower.includes('internet')) {
       return 'internet_paused';
     }
+    if (lower.includes('khung') || lower.includes('window') || lower.includes('ngoài') || lower.includes('outside')) {
+      return 'outside_time_window';
+    }
     if (lower.includes('hết') || lower.includes('giờ') || lower.includes('time') || lower.includes('limit')) {
       return 'time_limit_exceeded';
     }
     return 'not_in_whitelist';
+  }
+
+  function updateBlockedUI(data) {
+    const nextReason = data?.reason || currentReason;
+    const nextBlockMode = data?.blockMode || currentBlockMode || detectBlockMode(rawReason);
+    const limitMinutes = data?.limitMinutes ?? null;
+    const usedSeconds = data?.usedSeconds ?? 0;
+    const timeWindowStart = data?.timeWindowStart ?? null;
+    const timeWindowEnd = data?.timeWindowEnd ?? null;
+
+    currentReason = nextReason;
+    currentBlockMode = nextBlockMode;
+
+    const hasConfigDetails = limitMinutes != null || timeWindowStart != null || timeWindowEnd != null;
+    if (hasConfigDetails) {
+      const newConfig = JSON.stringify({
+        limitMinutes,
+        timeWindowStart,
+        timeWindowEnd,
+      });
+      if (lastConfig !== null && lastConfig !== newConfig) {
+        window.location.reload();
+        return;
+      }
+      lastConfig = newConfig;
+    }
+
+    const copy = nextReason === 'internet_paused'
+      ? {
+          title: 'Internet đang bị tạm dừng',
+          reason: 'Internet của bạn đang bị phụ huynh tạm dừng. Vui lòng liên hệ để bật lại.',
+          detail: 'Internet đã bị tạm dừng bởi phụ huynh.',
+        }
+      : nextReason === 'outside_time_window' || nextBlockMode === 'time_window'
+        ? {
+            title: 'Ngoài khung giờ cho phép',
+            reason: 'Website này chỉ được phép truy cập trong khung giờ nhất định. Vui lòng quay lại đúng giờ.',
+            detail: `Khung giờ: ${timeWindowStart || '--:--'} – ${timeWindowEnd || '--:--'}`,
+          }
+        : nextReason === 'time_limit_exceeded'
+          ? {
+              title: 'Đã hết thời gian sử dụng',
+              reason: 'Bạn đã dùng hết thời gian được phép cho website này hôm nay.',
+              detail: `Đã dùng: ${Math.floor((usedSeconds || 0) / 60)} phút / ${limitMinutes ?? '?'} phút`,
+            }
+          : {
+              title: 'Trang web bị chặn',
+              reason: 'Không có trong danh sách được phép.',
+              detail: 'Website này chưa được phụ huynh cho phép.',
+            };
+
+    if (titleEl) titleEl.textContent = copy.title;
+    if (reasonEl) reasonEl.textContent = copy.reason;
+    if (reasonTextEl) reasonTextEl.textContent = copy.title;
+    if (infoEl) infoEl.textContent = copy.detail;
   }
 
   function showStatus(msg, type) {
@@ -76,6 +156,12 @@ function getApiBase() {
       reasonMsgEl.style.borderColor = 'rgba(239,68,68,0.25)';
       reasonMsgEl.style.background = 'rgba(239,68,68,0.06)';
       if (btnText) btnText.textContent = 'Yêu cầu bật lại Internet';
+    } else if (currentBlockMode === 'time_window' || currentReason === 'time_window' || currentReason === 'outside_time_window') {
+      reasonMsgEl.innerHTML = `⏰ <strong>Website này chỉ mở trong khung giờ cho phép</strong>.<br>
+        Gửi yêu cầu nếu bạn cần gia hạn khung giờ hoặc chờ đến đúng giờ truy cập.`;
+      reasonMsgEl.style.borderColor = 'rgba(59,130,246,0.25)';
+      reasonMsgEl.style.background = 'rgba(59,130,246,0.06)';
+      if (btnText) btnText.textContent = 'Xin mở khung giờ';
     } else if (currentReason === 'time_limit_exceeded') {
       reasonMsgEl.innerHTML = `⏱ Bạn đã <strong>hết thời gian</strong> cho <strong>${blockedDomain}</strong> hôm nay.<br>
         Gửi yêu cầu để bố/mẹ gia hạn thêm.`;
@@ -91,29 +177,52 @@ function getApiBase() {
     }
   }
 
+  function clearPolling() {
+    if (fastPollTimer) {
+      clearInterval(fastPollTimer);
+      fastPollTimer = null;
+    }
+    if (slowPollTimer) {
+      clearInterval(slowPollTimer);
+      slowPollTimer = null;
+    }
+  }
+
   async function loadReasonFromApi() {
-    if (rawReason || !blockedDomain) {
+    if (!blockedDomain) {
+      updateBlockedUI({ reason: currentReason, blockMode: currentBlockMode });
       renderReasonMessage();
       return;
     }
-    try {
-      const stored = await chrome.storage.local.get([TOKEN_KEY]);
-      const token = stored[TOKEN_KEY];
-      if (!token) {
-        renderReasonMessage();
-        return;
-      }
 
-      const res = await fetch(`${apiBase}/block-info?domain=${encodeURIComponent(blockedDomain)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const info = await res.json();
-        currentReason = info.reason || 'not_in_whitelist';
+    let info = null;
+    if (!rawReason) {
+      try {
+        const stored = await chrome.storage.local.get([TOKEN_KEY]);
+        const token = stored[TOKEN_KEY];
+        if (token) {
+          const res = await fetch(`${apiBase}/block-info?domain=${encodeURIComponent(blockedDomain)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            info = await res.json();
+            currentReason = detectReasonType(info.reason || '');
+            currentBlockMode = detectBlockMode(info.reason || '') || currentBlockMode;
+          }
+        }
+      } catch {
+        // Giữ reason hiện tại nếu API lỗi.
       }
-    } catch {
-      // Use default reason if API lookup fails.
     }
+
+    updateBlockedUI({
+      reason: info?.reason || currentReason,
+      blockMode: info?.blockMode || currentBlockMode,
+      limitMinutes: info?.limitMinutes ?? null,
+      usedSeconds: info?.usedSeconds ?? 0,
+      timeWindowStart: info?.timeWindowStart ?? null,
+      timeWindowEnd: info?.timeWindowEnd ?? null,
+    });
     renderReasonMessage();
   }
 
@@ -163,7 +272,7 @@ function getApiBase() {
     }
   });
 
-  async function checkAndRedirect() {
+  async function pollCheck(updateUI = false) {
     if (!blockedDomain) return false;
     try {
       const stored = await chrome.storage.local.get([TOKEN_KEY]);
@@ -174,13 +283,22 @@ function getApiBase() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return false;
+
       const data = await res.json();
       const isAllowed = data.allowed === true || data.isAllowed === true || data.result === true;
       if (isAllowed) {
-        if (pollTimer) clearInterval(pollTimer);
+        clearPolling();
         const targetUrl = blockedFullUrl || `https://${blockedDomain}`;
         window.location.href = targetUrl;
         return true;
+      }
+
+      currentReason = data.reason || currentReason || detectReasonType(rawReason);
+      currentBlockMode = data.blockMode || currentBlockMode || detectBlockMode(rawReason) || null;
+
+      if (updateUI) {
+        updateBlockedUI(data);
+        renderReasonMessage();
       }
     } catch {
       // Ignore network issues and continue polling.
@@ -189,36 +307,26 @@ function getApiBase() {
   }
 
   function startPassivePolling() {
-    setTimeout(checkAndRedirect, 5000);
-
-    pollTimer = setInterval(async () => {
-      pollCount++;
-      if (pollCount > MAX_POLL) {
-        clearInterval(pollTimer);
-        if (pollingEl) pollingEl.style.display = 'none';
-        return;
-      }
-      await checkAndRedirect();
-    }, 30_000);
+    clearPolling();
+    fastPollTimer = setInterval(() => {
+      void pollCheck(false);
+    }, FAST_POLL_MS);
+    slowPollTimer = setInterval(() => {
+      void pollCheck(true);
+    }, SLOW_POLL_MS);
+    void pollCheck(true);
   }
 
   function startActivePolling() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollCount = 0;
+    clearPolling();
     if (pollingEl) pollingEl.style.display = 'block';
-
-    setTimeout(checkAndRedirect, 3000);
-
-    pollTimer = setInterval(async () => {
-      pollCount++;
-      if (pollCount > MAX_POLL) {
-        clearInterval(pollTimer);
-        if (pollingEl) pollingEl.style.display = 'none';
-        return;
-      }
-      const redirected = await checkAndRedirect();
-      if (redirected) clearInterval(pollTimer);
-    }, 10_000);
+    fastPollTimer = setInterval(() => {
+      void pollCheck(false);
+    }, 5000);
+    slowPollTimer = setInterval(() => {
+      void pollCheck(true);
+    }, 10000);
+    void pollCheck(true);
   }
 
   loadReasonFromApi();

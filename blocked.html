@@ -223,10 +223,24 @@
 <body>
   <div class="card">
     <span class="icon">🚫</span>
-    <h1>Trang web bị chặn</h1>
+    <h1 id="block-title">Trang web bị chặn</h1>
 
     <div class="domain" id="domain-display">example.com</div>
-    <p class="reason" id="reason-display">Không có trong danh sách được phép</p>
+    <p class="reason" id="block-reason">Không có trong danh sách được phép</p>
+    <p
+      id="block-reason-text"
+      class="reason"
+      style="margin-top: 8px; font-size: 16px; font-weight: 700; color: #fff;"
+    >
+      Trang web này đang bị chặn
+    </p>
+    <p
+      id="block-info-detail"
+      class="reason"
+      style="margin-top: 4px; font-size: 13px; color: rgba(229, 231, 235, 0.7);"
+    >
+      <!-- Sẽ được JS cập nhật -->
+    </p>
 
     <div class="buttons">
       <button class="btn btn-back" onclick="history.back()">← Quay lại</button>
