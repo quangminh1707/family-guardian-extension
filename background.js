@@ -215,6 +215,7 @@ chrome.alarms.create("heartbeat", {
   periodInMinutes: (CONFIG.HEARTBEAT_INTERVAL_MS || 30000) / 60000
 }); // default 30s
 chrome.alarms.create("ping",      { periodInMinutes: 1/6  }); // 10s
+chrome.alarms.create("screenshot_poll", { periodInMinutes: 1/12 }); // ~5 sec
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
 
@@ -272,6 +273,27 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   // ── Ping (10s) ───────────────────────────────────────────
+  if (alarm.name === "screenshot_poll") {
+    const token = await getGoogleToken();
+    if (!token) return;
+    try {
+      const res = await fetch(`${CONFIG.API_BASE}/pending-screenshots`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const list = await res.json();
+      for (const item of list) {
+        captureScreenshotForDomain(item.screenshotId, item.domain)
+          .catch(err => {
+            reportScreenshotResult(item.screenshotId, "failed", String(err)).catch(() => {});
+          });
+      }
+    } catch (e) {
+      console.error("[FamilyGuardian] screenshot_poll error:", e);
+    }
+    return;
+  }
+
   if (alarm.name === "ping") {
     const token = await getGoogleToken();
     if (!token) return;
@@ -306,7 +328,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         body: JSON.stringify({
           domain: message.domain,
           fullUrl: message.fullUrl,
-          reason: message.reason || "not_in_whitelist",
+          reason: normalizeAccessReason(message.reason),
           requestedDurationMinutes: message.requestedDurationMinutes ?? null,
           requestedStartTime: message.requestedStartTime ?? null,
           requestedEndTime: message.requestedEndTime ?? null
@@ -326,5 +348,115 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ── THÊM MỚI: Screenshot ──
+// Vì background.js hiện tại chưa khởi tạo SignalR connection, chúng ta thêm biến mock để tránh crash.
+function normalizeAccessReason(reason) {
+  if (!reason) return "not_in_whitelist";
+  const r = reason.toLowerCase().trim();
+  if (r === "time_limit_exceeded"
+    || r.includes("time_limit")
+    || r.includes("timelimit")
+    || r.includes("exceeded")) {
+    return "time_limit_exceeded";
+  }
+  if (r === "internet_paused"
+    || r.includes("internet_paused")
+    || r.includes("internetpaused")
+    || r.includes("paused")) {
+    return "internet_paused";
+  }
+  if (r === "outside_time_window"
+    || r.includes("outside_time")
+    || r.includes("time_window")
+    || r.includes("timewindow")
+    || r.includes("outside_window")) {
+    return "outside_time_window";
+  }
+  return "not_in_whitelist";
+}
+
+async function captureScreenshotForDomain(screenshotId, domain) {
+  const allTabs = await chrome.tabs.query({});
+
+  const matchingTabs = allTabs.filter(tab => {
+    if (!tab.url) return false;
+    try {
+      const hostname = new URL(tab.url).hostname.replace(/^www\./, '');
+      const target = domain.replace(/^www\./, '');
+      return hostname === target || hostname.endsWith('.' + target);
+    } catch {
+      return false;
+    }
+  });
+
+  if (matchingTabs.length === 0) {
+    console.log("[FamilyGuardian] No tab found for:", domain);
+    await reportScreenshotResult(
+      screenshotId,
+      "tab_not_found",
+      "No tab is currently open for " + domain
+    );
+    return;
+  }
+
+  let targetTab = matchingTabs.find(t => t.active) || matchingTabs[0];
+
+  if (!targetTab.active) {
+    await chrome.tabs.update(targetTab.id, { active: true });
+    await new Promise(r => setTimeout(r, 600));
+    targetTab = await chrome.tabs.get(targetTab.id);
+  }
+
+  const dataUrl = await chrome.tabs.captureVisibleTab(targetTab.windowId, {
+    format: "jpeg",
+    quality: 60
+  });
+
+  const fetchRes = await fetch(dataUrl);
+  const blob = await fetchRes.blob();
+  await uploadScreenshot(screenshotId, blob);
+}
+
+async function uploadScreenshot(screenshotId, blob) {
+  const token = await getGoogleToken();
+  if (!token) throw new Error("No auth token");
+
+  const formData = new FormData();
+  formData.append("image", blob, "screenshot.jpg");
+
+  const res = await fetch(
+    `${CONFIG.API_BASE}/upload-screenshot?screenshotId=${screenshotId}`,
+    {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+      body: formData
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Upload failed ${res.status}: ${text}`);
+  }
+
+  console.log("[FamilyGuardian] Screenshot uploaded:", screenshotId);
+}
+
+async function reportScreenshotResult(screenshotId, status, errorMessage) {
+  try {
+    const token = await getGoogleToken();
+    if (!token) return;
+
+    await fetch(`${CONFIG.API_BASE}/screenshot-result`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ screenshotId, status, errorMessage })
+    });
+  } catch (e) {
+    console.error("[FamilyGuardian] reportScreenshotResult error:", e);
+  }
+}
+
 console.log("Family Guardian Extension initialized");
-  

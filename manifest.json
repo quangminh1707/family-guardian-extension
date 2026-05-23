@@ -15,11 +15,13 @@
     "alarms",
     "tabs",
     "webRequest",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "http://*/*",
-    "https://*/*"
+    "https://*/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

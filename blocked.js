@@ -1,4 +1,4 @@
-﻿const params = new URLSearchParams(location.search);
+const params = new URLSearchParams(location.search);
 const blockedDomain = params.get('domain') || '';
 const rawReason = params.get('reason') || '';
 const blockedFullUrl = params.get('url') || '';
@@ -44,6 +44,29 @@ function getApiBase() {
   if (!btnRequest || !statusDiv) return;
 
   const apiBase = getApiBase();
+
+  // ── Hàm hiển thị trạng thái sau khi gửi yêu cầu ──
+  function showStatus(message, type) {
+    if (!statusDiv) return;
+    statusDiv.style.display      = 'block';
+    statusDiv.style.marginTop    = '10px';
+    statusDiv.style.padding      = '10px 14px';
+    statusDiv.style.borderRadius = '8px';
+    statusDiv.style.fontSize     = '13px';
+    statusDiv.style.lineHeight   = '1.5';
+    statusDiv.style.textAlign    = 'center';
+    if (type === 'success') {
+      statusDiv.style.background = 'rgba(34, 197, 94, 0.12)';
+      statusDiv.style.border     = '1px solid rgba(34, 197, 94, 0.30)';
+      statusDiv.style.color      = '#86efac';
+    } else {
+      statusDiv.style.background = 'rgba(239, 68, 68, 0.12)';
+      statusDiv.style.border     = '1px solid rgba(239, 68, 68, 0.30)';
+      statusDiv.style.color      = '#fca5a5';
+    }
+    statusDiv.textContent = message;
+  }
+
   let currentReason = detectReasonType(rawReason);
   let currentBlockMode = detectBlockMode(rawReason);
   const FAST_POLL_MS = 8000;
@@ -79,101 +102,77 @@ function getApiBase() {
     return 'not_in_whitelist';
   }
 
-  function updateBlockedUI(data) {
-    const nextReason = data?.reason || currentReason;
-    const nextBlockMode = data?.blockMode || currentBlockMode || detectBlockMode(rawReason);
-    const limitMinutes = data?.limitMinutes ?? null;
-    const usedSeconds = data?.usedSeconds ?? 0;
-    const timeWindowStart = data?.timeWindowStart ?? null;
-    const timeWindowEnd = data?.timeWindowEnd ?? null;
+  function applyReasonUI(reason, data) {
+    const reasonEl     = document.getElementById('block-reason');
+    const reasonTextEl = document.getElementById('block-reason-text');
+    const infoDetailEl = document.getElementById('block-info-detail');
+    const reasonMsgEl  = document.getElementById('block-reason-msg');
 
-    currentReason = nextReason;
-    currentBlockMode = nextBlockMode;
+    switch (reason) {
+      case 'time_limit_exceeded': {
+        const limit   = data?.limitMinutes ?? '?';
+        const usedMin = data?.usedSeconds != null
+          ? Math.floor(data.usedSeconds / 60)
+          : null;
 
-    const hasConfigDetails = limitMinutes != null || timeWindowStart != null || timeWindowEnd != null;
-    if (hasConfigDetails) {
-      const newConfig = JSON.stringify({
-        limitMinutes,
-        timeWindowStart,
-        timeWindowEnd,
-      });
-      if (lastConfig !== null && lastConfig !== newConfig) {
-        window.location.reload();
-        return;
-      }
-      lastConfig = newConfig;
-    }
-
-    const copy = nextReason === 'internet_paused'
-      ? {
-          title: 'Internet đang bị tạm dừng',
-          reason: 'Internet của bạn đang bị phụ huynh tạm dừng. Vui lòng liên hệ để bật lại.',
-          detail: 'Internet đã bị tạm dừng bởi phụ huynh.',
+        if (reasonEl) reasonEl.textContent = `Đã hết ${limit} phút cho phép hôm nay`;
+        if (reasonTextEl) reasonTextEl.textContent = 'Đã hết thời gian sử dụng';
+        if (infoDetailEl) infoDetailEl.textContent = usedMin != null
+            ? `Đã dùng: ${usedMin} phút / ${limit} phút`
+            : `Giới hạn: ${limit} phút/ngày`;
+        if (reasonMsgEl) {
+          reasonMsgEl.textContent = `🕐 Bạn đã dùng hết ${limit} phút được cho phép hôm nay.\nGửi yêu cầu để được thêm thời gian.`;
+          reasonMsgEl.style.borderColor = 'rgba(251,191,36,0.25)';
+          reasonMsgEl.style.background = 'rgba(251,191,36,0.06)';
         }
-      : nextReason === 'outside_time_window' || nextBlockMode === 'time_window'
-        ? {
-            title: 'Ngoài khung giờ cho phép',
-            reason: 'Website này chỉ được phép truy cập trong khung giờ nhất định. Vui lòng quay lại đúng giờ.',
-            detail: `Khung giờ: ${timeWindowStart || '--:--'} – ${timeWindowEnd || '--:--'}`,
-          }
-        : nextReason === 'time_limit_exceeded'
-          ? {
-              title: 'Đã hết thời gian sử dụng',
-              reason: 'Bạn đã dùng hết thời gian được phép cho website này hôm nay.',
-              detail: `Đã dùng: ${Math.floor((usedSeconds || 0) / 60)} phút / ${limitMinutes ?? '?'} phút`,
-            }
-          : {
-              title: 'Trang web bị chặn',
-              reason: 'Không có trong danh sách được phép.',
-              detail: 'Website này chưa được phụ huynh cho phép.',
-            };
+        if (btnText) btnText.textContent = 'Xin thêm thời gian';
+        break;
+      }
 
-    if (titleEl) titleEl.textContent = copy.title;
-    if (reasonEl) reasonEl.textContent = copy.reason;
-    if (reasonTextEl) reasonTextEl.textContent = copy.title;
-    if (infoEl) infoEl.textContent = copy.detail;
-  }
+      case 'outside_time_window': {
+        const start = data?.timeWindowStart ?? '--:--';
+        const end   = data?.timeWindowEnd   ?? '--:--';
 
-  function showStatus(msg, type) {
-    statusDiv.style.display = 'block';
-    statusDiv.textContent = msg;
-    const map = {
-      success: { bg: 'rgba(34,197,94,0.12)', color: '#4ade80', border: 'rgba(34,197,94,0.25)' },
-      error: { bg: 'rgba(239,68,68,0.12)', color: '#f87171', border: 'rgba(239,68,68,0.25)' },
-      info: { bg: 'rgba(124,58,237,0.12)', color: '#c4b5fd', border: 'rgba(124,58,237,0.25)' },
-    };
-    const c = map[type] || map.info;
-    statusDiv.style.cssText += `
-      background:${c.bg}; color:${c.color}; border:1px solid ${c.border};
-    `;
-  }
+        if (reasonEl) reasonEl.textContent = `Ngoài khung giờ cho phép`;
+        if (reasonTextEl) reasonTextEl.textContent = 'Ngoài khung giờ cho phép';
+        if (infoDetailEl) infoDetailEl.textContent = (start !== '--:--' && end !== '--:--')
+            ? `Khung giờ được phép: ${start} – ${end}`
+            : 'Website này chỉ được dùng trong khung giờ nhất định';
+        if (reasonMsgEl) {
+          reasonMsgEl.textContent = `⏰ Website này chỉ được truy cập trong khung giờ ${start} – ${end}.\nGửi yêu cầu để được truy cập ngoài giờ.`;
+          reasonMsgEl.style.borderColor = 'rgba(59,130,246,0.25)';
+          reasonMsgEl.style.background = 'rgba(59,130,246,0.06)';
+        }
+        if (btnText) btnText.textContent = 'Xin mở khung giờ';
+        break;
+      }
 
-  function renderReasonMessage() {
-    if (!reasonMsgEl || !blockedDomain) return;
-    if (currentReason === 'internet_paused') {
-      reasonMsgEl.innerHTML = `⏸ <strong>Internet đang bị tạm dừng</strong> bởi phụ huynh.<br>
-        Gửi yêu cầu để bố/mẹ bật lại.`;
-      reasonMsgEl.style.borderColor = 'rgba(239,68,68,0.25)';
-      reasonMsgEl.style.background = 'rgba(239,68,68,0.06)';
-      if (btnText) btnText.textContent = 'Yêu cầu bật lại Internet';
-    } else if (currentBlockMode === 'time_window' || currentReason === 'time_window' || currentReason === 'outside_time_window') {
-      reasonMsgEl.innerHTML = `⏰ <strong>Website này chỉ mở trong khung giờ cho phép</strong>.<br>
-        Gửi yêu cầu nếu bạn cần gia hạn khung giờ hoặc chờ đến đúng giờ truy cập.`;
-      reasonMsgEl.style.borderColor = 'rgba(59,130,246,0.25)';
-      reasonMsgEl.style.background = 'rgba(59,130,246,0.06)';
-      if (btnText) btnText.textContent = 'Xin mở khung giờ';
-    } else if (currentReason === 'time_limit_exceeded') {
-      reasonMsgEl.innerHTML = `⏱ Bạn đã <strong>hết thời gian</strong> cho <strong>${blockedDomain}</strong> hôm nay.<br>
-        Gửi yêu cầu để bố/mẹ gia hạn thêm.`;
-      reasonMsgEl.style.borderColor = 'rgba(251,191,36,0.25)';
-      reasonMsgEl.style.background = 'rgba(251,191,36,0.06)';
-      if (btnText) btnText.textContent = 'Xin thêm thời gian';
-    } else {
-      reasonMsgEl.innerHTML = `🌐 Trang <strong>${blockedDomain}</strong> chưa được bố/mẹ cho phép.<br>
-        Gửi yêu cầu để được duyệt truy cập.`;
-      reasonMsgEl.style.borderColor = 'rgba(124,58,237,0.25)';
-      reasonMsgEl.style.background = 'rgba(124,58,237,0.06)';
-      if (btnText) btnText.textContent = 'Gửi yêu cầu truy cập';
+      case 'internet_paused': {
+        if (reasonEl) reasonEl.textContent = 'Internet đã bị tạm dừng bởi bố/mẹ';
+        if (reasonTextEl) reasonTextEl.textContent = 'Internet đang bị tạm dừng';
+        if (infoDetailEl) infoDetailEl.textContent = 'Tất cả kết nối web đang bị chặn hoàn toàn';
+        if (reasonMsgEl) {
+          reasonMsgEl.textContent = `🚫 Bố/mẹ đã tạm dừng toàn bộ internet.\nGửi yêu cầu để được bật lại.`;
+          reasonMsgEl.style.borderColor = 'rgba(239,68,68,0.25)';
+          reasonMsgEl.style.background = 'rgba(239,68,68,0.06)';
+        }
+        if (btnText) btnText.textContent = 'Gửi yêu cầu bật lại internet';
+        break;
+      }
+
+      default: {
+        if (reasonEl) reasonEl.textContent = 'Không có trong danh sách được phép';
+        if (reasonTextEl) reasonTextEl.textContent = 'Trang web bị chặn';
+        if (infoDetailEl) infoDetailEl.textContent = 'Website này chưa được bố/mẹ cho phép';
+        if (reasonMsgEl) {
+          const domainDisplay = blockedDomain || 'trang web này';
+          reasonMsgEl.textContent = `🌐 Trang ${domainDisplay} chưa được bố/mẹ cho phép.\nGửi yêu cầu để được duyệt truy cập.`;
+          reasonMsgEl.style.borderColor = 'rgba(124,58,237,0.25)';
+          reasonMsgEl.style.background = 'rgba(124,58,237,0.06)';
+        }
+        if (btnText) btnText.textContent = 'Gửi yêu cầu truy cập';
+        break;
+      }
     }
   }
 
@@ -190,8 +189,7 @@ function getApiBase() {
 
   async function loadReasonFromApi() {
     if (!blockedDomain) {
-      updateBlockedUI({ reason: currentReason, blockMode: currentBlockMode });
-      renderReasonMessage();
+      applyReasonUI(currentReason, null);
       return;
     }
 
@@ -215,15 +213,12 @@ function getApiBase() {
       }
     }
 
-    updateBlockedUI({
-      reason: info?.reason || currentReason,
-      blockMode: info?.blockMode || currentBlockMode,
+    applyReasonUI(info?.reason || currentReason, {
       limitMinutes: info?.limitMinutes ?? null,
-      usedSeconds: info?.usedSeconds ?? 0,
+      usedSeconds: info?.usedSeconds ?? null,
       timeWindowStart: info?.timeWindowStart ?? null,
       timeWindowEnd: info?.timeWindowEnd ?? null,
     });
-    renderReasonMessage();
   }
 
   btnRequest.addEventListener('click', async () => {
@@ -258,7 +253,7 @@ function getApiBase() {
         showStatus(msg, 'error');
         btnRequest.disabled = false;
         btnRequest.style.opacity = '1';
-        renderReasonMessage();
+        applyReasonUI(currentReason, null);
       }
     } catch (e) {
       if (e.message === 'no_token') {
@@ -268,7 +263,7 @@ function getApiBase() {
       }
       btnRequest.disabled = false;
       btnRequest.style.opacity = '1';
-      renderReasonMessage();
+      applyReasonUI(currentReason, null);
     }
   });
 
@@ -297,8 +292,18 @@ function getApiBase() {
       currentBlockMode = data.blockMode || currentBlockMode || detectBlockMode(rawReason) || null;
 
       if (updateUI) {
-        updateBlockedUI(data);
-        renderReasonMessage();
+        applyReasonUI(currentReason, data);
+
+        const newConfig = JSON.stringify({
+          limitMinutes:    data?.limitMinutes,
+          timeWindowStart: data?.timeWindowStart,
+          timeWindowEnd:   data?.timeWindowEnd
+        });
+        if (lastConfig !== null && lastConfig !== newConfig) {
+          window.location.reload();
+          return true;
+        }
+        lastConfig = newConfig;
       }
     } catch {
       // Ignore network issues and continue polling.
@@ -329,6 +334,7 @@ function getApiBase() {
     void pollCheck(true);
   }
 
+  applyReasonUI(currentReason, null);
   loadReasonFromApi();
   startPassivePolling();
 })();
