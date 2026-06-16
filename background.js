@@ -1,16 +1,137 @@
-
+﻿
 
 
 
 importScripts("config.js");
 
 const domainCache = new Map();
+let safeSearchEnabled = false;
+let extensionConfigLoadedAt = 0;
+let extensionConfigLoadPromise = null;
+let cachedExtensionConfig = null;
+
+const EXTENSION_CONFIG_CACHE_MS = 5 * 60 * 1000;
+const WHITELIST_CACHE_KEY = 'fg_whitelist_cache';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 giá»
+
+function normalizeDomainForCache(domain) {
+  if (!domain) return '';
+  return domain.replace(/^www\./, '').trim().toLowerCase();
+}
+
+async function saveWhitelistCache(domains) {
+  try {
+    await chrome.storage.local.set({
+      [WHITELIST_CACHE_KEY]: {
+        domains,
+        savedAt: Date.now()
+      }
+    });
+  } catch (e) {
+    console.warn('[FG] KhÃ´ng lÆ°u Ä‘Æ°á»£c whitelist cache:', e);
+  }
+}
+
+async function getWhitelistCache() {
+  try {
+    const result = await chrome.storage.local.get(WHITELIST_CACHE_KEY);
+    const cache = result[WHITELIST_CACHE_KEY];
+    if (!cache || !Array.isArray(cache.domains)) return null;
+    if (Date.now() - cache.savedAt > CACHE_MAX_AGE_MS) return null;
+    return cache.domains;
+  } catch {
+    return null;
+  }
+}
+
+function isDomainInCache(domain, cachedDomains) {
+  if (!cachedDomains || !domain) return false;
+  const clean = normalizeDomainForCache(domain);
+  return cachedDomains.some((cachedDomain) => {
+    const cached = normalizeDomainForCache(cachedDomain);
+    return clean === cached || clean.endsWith(`.${cached}`);
+  });
+}
+
+const SAFESEARCH_RULES = {
+  'google.com': { param: 'safe', value: 'active' },
+  'www.google.com': { param: 'safe', value: 'active' },
+  'bing.com': { param: 'adlt', value: 'strict' },
+  'www.bing.com': { param: 'adlt', value: 'strict' },
+  'duckduckgo.com': { param: 'kp', value: '1' },
+};
+
+async function loadExtensionConfig(force = false) {
+  const isFresh = cachedExtensionConfig && (Date.now() - extensionConfigLoadedAt) < EXTENSION_CONFIG_CACHE_MS;
+  if (isFresh && !force) {
+    return cachedExtensionConfig;
+  }
+
+  if (extensionConfigLoadPromise && !force) {
+    return extensionConfigLoadPromise;
+  }
+
+  extensionConfigLoadPromise = (async () => {
+    const token = await getGoogleToken();
+    if (!token) return null;
+
+    try {
+      const response = await fetch(`${CONFIG.API_BASE}/config`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (!response.ok) return null;
+
+      const configData = await response.json();
+      safeSearchEnabled = configData.filterEnabled === true;
+      cachedExtensionConfig = configData;
+      extensionConfigLoadedAt = Date.now();
+
+      if (configData.allowedDomains && Array.isArray(configData.allowedDomains)) {
+        await saveWhitelistCache(configData.allowedDomains);
+      }
+
+      return configData;
+    } catch (e) {
+      console.warn('[FG] Failed to load extension config:', e);
+      return null;
+    } finally {
+      extensionConfigLoadPromise = null;
+    }
+  })();
+
+  return extensionConfigLoadPromise;
+}
+
+function applySafeSearch(url) {
+  if (!safeSearchEnabled) return null;
+
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^www\./, '');
+    const fullHostname = parsed.hostname;
+    const rule = SAFESEARCH_RULES[fullHostname] || SAFESEARCH_RULES[hostname];
+    if (!rule) return null;
+
+    if (!parsed.searchParams.has('q') && !parsed.searchParams.has('query')) return null;
+    if (parsed.searchParams.get(rule.param) === rule.value) return null;
+
+    parsed.searchParams.set(rule.param, rule.value);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
 
 function isCacheValid(entry) {
   return entry && (Date.now() - entry.time) < CONFIG.CACHE_TTL_MS;
 }
 
-// ─── Google Token ──────────────────────────────────────────
+// â”€â”€â”€ Google Token â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function getGoogleToken() {
   return new Promise((resolve) => {
     chrome.identity.getAuthToken({ interactive: false }, (token) => {
@@ -20,20 +141,20 @@ async function getGoogleToken() {
   });
 }
 
-// ─── In-page Banner — FIRE AND FORGET, không await ────────
-// Không bao giờ await hàm này trước khi block
+// â”€â”€â”€ In-page Banner â€” FIRE AND FORGET, khÃ´ng await â”€â”€â”€â”€â”€â”€â”€â”€
+// KhÃ´ng bao giá» await hÃ m nÃ y trÆ°á»›c khi block
 function showBannerAsync(tabId, domain, message, remainingSeconds) {
   if (!tabId) return;
 
   const mins = Math.floor(remainingSeconds / 60);
   const secs = remainingSeconds % 60;
   const timeText = remainingSeconds <= 0
-    ? "hết giờ"
+    ? "háº¿t giá»"
     : mins > 0
-      ? (secs > 0 ? `${mins} phút ${secs} giây` : `${mins} phút`)
-      : `${remainingSeconds} giây`;
+      ? (secs > 0 ? `${mins} phÃºt ${secs} giÃ¢y` : `${mins} phÃºt`)
+      : `${remainingSeconds} giÃ¢y`;
 
-  // Không await — chạy nền, không block luồng chính
+  // KhÃ´ng await â€” cháº¡y ná»n, khÃ´ng block luá»“ng chÃ­nh
   chrome.scripting.executeScript({
     target: { tabId },
     func: (domain, message, timeText) => {
@@ -56,22 +177,22 @@ function showBannerAsync(tabId, domain, message, remainingSeconds) {
       el.id = '__fg_banner__';
       el.innerHTML = `
         <div style="display:flex;align-items:flex-start;gap:12px;">
-          <span style="font-size:26px;line-height:1;flex-shrink:0">⏰</span>
+          <span style="font-size:26px;line-height:1;flex-shrink:0">â°</span>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:800;color:#111;margin-bottom:3px">
-              Sắp hết giờ — ${domain}
+              Sáº¯p háº¿t giá» â€” ${domain}
             </div>
             <div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:7px">
               ${message}
             </div>
             <span style="background:#fff3cd;border:1px solid #ffc107;border-radius:7px;
                          padding:3px 9px;font-size:11px;font-weight:700;color:#856404">
-              ⌛ Còn lại: ${timeText}
+              âŒ› CÃ²n láº¡i: ${timeText}
             </span>
           </div>
           <button onclick="this.closest('#__fg_banner__').remove()"
             style="background:none;border:none;cursor:pointer;font-size:17px;
-                   color:#aaa;padding:0;line-height:1;flex-shrink:0">✕</button>
+                   color:#aaa;padding:0;line-height:1;flex-shrink:0">âœ•</button>
         </div>
       `;
       Object.assign(el.style, {
@@ -92,27 +213,27 @@ function showBannerAsync(tabId, domain, message, remainingSeconds) {
     },
     args: [domain, message, timeText]
   }).catch(() => {
-    // Fallback nếu không inject được (PDF, chrome://, etc.)
+    // Fallback náº¿u khÃ´ng inject Ä‘Æ°á»£c (PDF, chrome://, etc.)
     chrome.notifications.create(`warn_${Date.now()}`, {
       type:'basic', iconUrl:'icons/icon48.png',
-      title:`⏰ Sắp hết giờ — ${domain}`,
-      message:`${message} (Còn lại: ${timeText})`,
+      title:`â° Sáº¯p háº¿t giá» â€” ${domain}`,
+      message:`${message} (CÃ²n láº¡i: ${timeText})`,
       priority:2
     });
   });
 }
 
-// ─── Time Info Overlay — góc dưới phải, bán trong suốt ───
+// â”€â”€â”€ Time Info Overlay â€” gÃ³c dÆ°á»›i pháº£i, bÃ¡n trong suá»‘t â”€â”€â”€
 function showTimeInfoOverlay(tabId, timeInfo) {
   if (!tabId || !timeInfo || !timeInfo.mode) return;
 
   let text = '';
   if (timeInfo.mode === 'timeWindow' && timeInfo.timeWindowDisplay) {
     const mins = timeInfo.minutesUntilWindowEnd;
-    text = `⏰ Khung giờ: ${timeInfo.timeWindowDisplay}`;
-    if (mins != null && mins > 0) text += ` · Còn ${mins} phút`;
+    text = `â° Khung giá»: ${timeInfo.timeWindowDisplay}`;
+    if (mins != null && mins > 0) text += ` Â· CÃ²n ${mins} phÃºt`;
   } else if (timeInfo.mode === 'minuteLimit' && timeInfo.minutesRemainingToday != null) {
-    text = `⏱ Còn ${timeInfo.minutesRemainingToday} phút hôm nay`;
+    text = `â± CÃ²n ${timeInfo.minutesRemainingToday} phÃºt hÃ´m nay`;
   }
 
   if (!text) return;
@@ -126,7 +247,7 @@ function showTimeInfoOverlay(tabId, timeInfo) {
         el.id = '__fg_time_overlay__';
         Object.assign(el.style, {
           position: 'fixed', bottom: '16px', right: '16px',
-          zIndex: '2147483646',  // 1 dưới banner warning
+          zIndex: '2147483646',  // 1 dÆ°á»›i banner warning
           background: 'rgba(0,0,0,0.65)',
           backdropFilter: 'blur(8px)',
           color: '#fff',
@@ -144,10 +265,10 @@ function showTimeInfoOverlay(tabId, timeInfo) {
       el.textContent = overlayText;
     },
     args: [text]
-  }).catch(() => {}); // Bỏ qua nếu không inject được (PDF, chrome://, etc.)
+  }).catch(() => {}); // Bá» qua náº¿u khÃ´ng inject Ä‘Æ°á»£c (PDF, chrome://, etc.)
 }
 
-// ─── Check domain ──────────────────────────────────────────
+// â”€â”€â”€ Check domain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function checkDomain(domain) {
   const cached = domainCache.get(domain);
   if (isCacheValid(cached)) return cached;
@@ -155,28 +276,67 @@ async function checkDomain(domain) {
   const token = await getGoogleToken();
   if (!token) return { allowed: true, reason: "Chưa đăng nhập" };
 
+  await loadExtensionConfig().catch(() => {});
+
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     const res = await fetch(
       `${CONFIG.API_BASE}/check?domain=${encodeURIComponent(domain)}`,
-      { headers: { Authorization:`Bearer ${token}`, "Content-Type":"application/json" } }
+      { headers: { Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, signal: controller.signal }
     );
+    clearTimeout(timeoutId);
+
     if (!res.ok) return { allowed: true, reason: "Lỗi server" };
 
     const data = await res.json();
-    const entry = { allowed:data.allowed, reason:data.reason||"",
-                    websiteId:data.allowedWebsiteId||null, time:Date.now() };
-    domainCache.set(domain, entry);
+    const entry = { allowed:data.allowed, reason:data.reason||"", websiteId:data.allowedWebsiteId||null, time:Date.now() };
+
+    if (entry.allowed) {
+      domainCache.set(domain, entry);
+    } else {
+      domainCache.delete(domain);
+    }
+
     console.log(`[CHECK] ${domain} → ${entry.allowed ? 'allowed' : 'blocked'}`);
     return entry;
-  } catch {
-    return { allowed: true, reason: "Lỗi mạng" };
+  } catch (err) {
+    const isNetworkError = err instanceof TypeError
+      || err?.name === 'AbortError'
+      || err?.name === 'TimeoutError'
+      || err?.message?.includes('fetch');
+
+    if (isNetworkError) {
+      console.warn('[FG] API không kết nối được, dùng offline cache:', err?.message);
+      const cachedDomains = await getWhitelistCache();
+
+      if (cachedDomains) {
+        const allowed = isDomainInCache(domain, cachedDomains);
+        console.log(`[FG] Offline check: ${domain} → ${allowed ? 'allowed' : 'blocked'}`);
+        return { allowed, reason: allowed ? 'offline_cache' : 'offline_block', websiteId: null };
+      }
+
+      console.warn('[FG] Không có cache, block offline');
+      return { allowed: false, reason: 'offline_block', websiteId: null };
+    }
+
+    throw err;
   }
 }
 
-// ─── Tab tracking ──────────────────────────────────────────
 let activeTab = null;
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    await loadExtensionConfig().catch(() => {});
+    const safeUrl = applySafeSearch(changeInfo.url);
+    if (safeUrl) {
+      await chrome.tabs.update(tabId, { url: safeUrl });
+      return;
+    }
+  }
+
   if (changeInfo.status !== "loading" || !tab.url) return;
   if (tab.url.startsWith("chrome") || tab.url.startsWith("about")) return;
 
@@ -210,7 +370,7 @@ chrome.tabs.onActivated.addListener(async (info) => {
   } catch { activeTab = null; }
 });
 
-// ─── Alarms ────────────────────────────────────────────────
+// â”€â”€â”€ Alarms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 chrome.alarms.create("heartbeat", {
   periodInMinutes: (CONFIG.HEARTBEAT_INTERVAL_MS || 30000) / 60000
 }); // default 30s
@@ -219,7 +379,7 @@ chrome.alarms.create("screenshot_poll", { periodInMinutes: 1/12 }); // ~5 sec
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
 
-  // ── Heartbeat (30s) ──────────────────────────────────────
+  // â”€â”€ Heartbeat (30s) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (alarm.name === "heartbeat") {
     if (!activeTab) return;
     const token = await getGoogleToken();
@@ -236,7 +396,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       const data = await res.json();
       console.log(`[HEARTBEAT] ${activeTab.domain} exceeded=${data.limitExceeded}`);
 
-      // ── 1. BLOCK NGAY — ưu tiên cao nhất, không delay ────
+      // â”€â”€ 1. BLOCK NGAY â€” Æ°u tiÃªn cao nháº¥t, khÃ´ng delay â”€â”€â”€â”€
       if (data.limitExceeded) {
         const tabId  = activeTab.tabId;
         const domain = activeTab.domain;
@@ -251,10 +411,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             + `&url=${encodeURIComponent(blockedUrl)}`
         });
         console.log(`[BLOCK] ${domain}`);
-        return; // dừng luôn, không làm gì thêm
+        return; // dá»«ng luÃ´n, khÃ´ng lÃ m gÃ¬ thÃªm
       }
 
-      // ── 2. Warning banner (chỉ chạy khi CHƯA block) ──────
+      // â”€â”€ 2. Warning banner (chá»‰ cháº¡y khi CHÆ¯A block) â”€â”€â”€â”€â”€â”€
       if (data.timeInfo) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const overlayTabId = tabs[0]?.id ?? activeTab?.tabId ?? null;
@@ -264,7 +424,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       if (data.warning) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const tabId = tabs[0]?.id ?? activeTab?.tabId ?? null;
-        // fire-and-forget — không await
+        // fire-and-forget â€” khÃ´ng await
         showBannerAsync(tabId, activeTab.domain,
           data.warning.message, data.warning.remainingSeconds);
       }
@@ -272,7 +432,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     } catch (e) { console.error("Heartbeat error:", e); }
   }
 
-  // ── Ping (10s) ───────────────────────────────────────────
+  // â”€â”€ Ping (10s) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (alarm.name === "screenshot_poll") {
     const token = await getGoogleToken();
     if (!token) return;
@@ -303,10 +463,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// ─── Messages ──────────────────────────────────────────────
+// â”€â”€â”€ Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CLEAR_CACHE") {
     domainCache.clear();
+    cachedExtensionConfig = null;
+    safeSearchEnabled = false;
+    extensionConfigLoadedAt = 0;
+    chrome.storage.local.remove(WHITELIST_CACHE_KEY).catch(() => {});
     sendResponse({ success: true });
     return true;
   }
@@ -315,7 +479,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "REQUEST_ACCESS") {
     getGoogleToken().then(token => {
       if (!token) {
-        sendResponse({ success: false, error: "Chưa đăng nhập Google" });
+        sendResponse({ success: false, error: "ChÆ°a Ä‘Äƒng nháº­p Google" });
         return;
       }
       
@@ -336,7 +500,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .then(res => res.json().then(data => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.message || "Lỗi server");
+        if (!ok) throw new Error(data.message || "Lá»—i server");
         sendResponse({ success: true });
       })
       .catch(err => {
@@ -344,12 +508,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     });
     
-    return true; // Bắt buộc return true khi dùng sendResponse bất đồng bộ
+    return true; // Báº¯t buá»™c return true khi dÃ¹ng sendResponse báº¥t Ä‘á»“ng bá»™
   }
 });
 
-// ── THÊM MỚI: Screenshot ──
-// Vì background.js hiện tại chưa khởi tạo SignalR connection, chúng ta thêm biến mock để tránh crash.
+// â”€â”€ THÃŠM Má»šI: Screenshot â”€â”€
+// VÃ¬ background.js hiá»‡n táº¡i chÆ°a khá»Ÿi táº¡o SignalR connection, chÃºng ta thÃªm biáº¿n mock Ä‘á»ƒ trÃ¡nh crash.
 function normalizeAccessReason(reason) {
   if (!reason) return "not_in_whitelist";
   const r = reason.toLowerCase().trim();
@@ -419,6 +583,7 @@ async function captureScreenshotForDomain(screenshotId, domain) {
 
 async function uploadScreenshot(screenshotId, blob) {
   const token = await getGoogleToken();
+  await loadExtensionConfig().catch(() => {});
   if (!token) throw new Error("No auth token");
 
   const formData = new FormData();
@@ -460,3 +625,4 @@ async function reportScreenshotResult(screenshotId, status, errorMessage) {
 }
 
 console.log("Family Guardian Extension initialized");
+
